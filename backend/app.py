@@ -1,5 +1,6 @@
 import os
-from flask import Flask, redirect, request, session, render_template
+from flask import Flask, redirect, request, session, jsonify
+from flask_cors import CORS
 from dotenv import load_dotenv
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
@@ -9,6 +10,7 @@ load_dotenv()
 
 # Initialize Flask
 app = Flask(__name__)
+CORS(app)
 app.secret_key = os.getenv("FLASK_SECRET_KEY")
 
 # Initialize Spotify OAuth
@@ -19,7 +21,7 @@ sp_oauth = SpotifyOAuth(
     scope="user-read-private user-read-playback-state streaming"
 )
 
-# store artists and albums (repalce with mongo db)
+# store artists and albums (replace with mongo db)
 trackr_saved_data = {
     'artists': [], 
     'albums': []
@@ -27,38 +29,50 @@ trackr_saved_data = {
 
 @app.route('/')
 def home():
-    # Check if the user is already logged in
     if not session.get("token_info"):
-        return render_template("home.html")
+        return redirect("http://localhost:3000")
+    return redirect("http://localhost:3000/main")
+
+@app.route('/main')
+def main():
+    # Check if the user is logged in
+    if not session.get("token_info"):
+        return jsonify({'error': 'Not authenticated'}), 401
     
-    # If logged in, obtain user data
-    token_info = session.get("token_info")
-    sp = spotipy.Spotify(auth=token_info['access_token'])
-    user = sp.current_user()
+    try:
+        token_info = session.get("token_info")
+        sp = spotipy.Spotify(auth=token_info['access_token'])
+        user = sp.current_user()
 
-    # Use trackr_saved_data instead of querying Spotify's top artists and albums
-    saved_artists = trackr_saved_data['artists']  # Use the saved artists data from your local storage
-    saved_albums = trackr_saved_data['albums']  # Use the saved albums data from your local storage
+        # Use trackr_saved_data or fetch from database
+        saved_artists = trackr_saved_data['artists']
+        saved_albums = trackr_saved_data['albums']
 
-    return render_template("main.html", user_name=user['display_name'], saved_artists=saved_artists, saved_albums=saved_albums)
-
-
+        return jsonify({
+            'userName': user['display_name'],
+            'savedArtists': saved_artists,
+            'savedAlbums': saved_albums
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/login')
 def login():
-    # Redirect to the Spotify login page
     return redirect(sp_oauth.get_authorize_url())
 
 @app.route('/callback')
 def callback():
-    token_info = sp_oauth.get_access_token(request.args['code'])  # Get access token from code
-    session['token_info'] = token_info  # Save token info to session
-    return redirect('/')  # Redirect back to home after authentication
+    try:
+        token_info = sp_oauth.get_access_token(request.args['code'])
+        session['token_info'] = token_info
+        return redirect('http://localhost:3000/main')  # Redirect to React main page
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/logout')
 def logout():
-    session.clear()  # Clear session to log out
-    return redirect('/')  # Redirect back to home
+    session.clear()
+    return redirect('http://localhost:3000')
 
 if __name__ == "__main__":
     app.run(debug=True)
